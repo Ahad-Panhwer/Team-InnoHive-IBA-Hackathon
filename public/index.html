@@ -1,0 +1,1462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CareLink — Emergency Coordination</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    :root {
+      --primary: #0b3d91;
+      --primary-light: #1565c0;
+      --accent: #d32f2f;
+      --success: #2e7d32;
+      --warning: #ef6c00;
+      --bg: #f0f4f8;
+      --card: #ffffff;
+      --text: #1a1a2e;
+      --text-muted: #6b7280;
+      --border: #e2e8f0;
+      --gov-bg: #e8f1fb;
+      --gov-text: #0b5cad;
+      --pvt-bg: #f3e8ff;
+      --pvt-text: #7b3fa0;
+      --char-bg: #e8f6ee;
+      --char-text: #1b7f45;
+      --radius: 12px;
+      --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', system-ui, sans-serif; background-color: var(--bg); color: var(--text); line-height: 1.5; }
+    
+    /* Layout */
+    .app-container { display: flex; flex-direction: column; min-height: 100vh; }
+    header { background: var(--primary); color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; box-shadow: var(--shadow); position: sticky; top: 0; z-index: 1000; }
+    .logo { display: flex; align-items: center; gap: 0.75rem; }
+    .logo h1 { font-size: 1.5rem; font-weight: 700; margin: 0; }
+    .logo p { font-size: 0.875rem; opacity: 0.8; margin: 0; }
+    
+    .nav-tabs { display: flex; gap: 0.5rem; }
+    .nav-tab { background: rgba(255,255,255,0.1); border: none; color: white; padding: 0.5rem 1rem; border-radius: var(--radius); cursor: pointer; font-weight: 500; transition: all 0.2s; }
+    .nav-tab:hover { background: rgba(255,255,255,0.2); }
+    .nav-tab.active { background: white; color: var(--primary); }
+    
+    .status-bar { display: flex; align-items: center; gap: 1rem; font-size: 0.875rem; }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--success); }
+    .status-dot.offline { background: var(--accent); }
+    .toggle-btn { background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 0.25rem 0.75rem; border-radius: 20px; cursor: pointer; font-size: 0.75rem; }
+
+    main { padding: 2rem; flex: 1; max-width: 1400px; margin: 0 auto; width: 100%; }
+    .view-section { display: none; }
+    .view-section.active { display: block; animation: fadeIn 0.3s ease; }
+
+    /* Components */
+    .card { background: var(--card); border-radius: var(--radius); padding: 1.5rem; box-shadow: var(--shadow); border: 1px solid var(--border); margin-bottom: 1.5rem; }
+    .card-title { font-size: 1.25rem; font-weight: 600; margin-bottom: 1rem; color: var(--primary); display: flex; justify-content: space-between; align-items: center; }
+    
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; }
+    .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+    
+    .btn { padding: 0.5rem 1rem; border-radius: var(--radius); font-weight: 500; cursor: pointer; transition: all 0.2s; border: none; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-light); }
+    .btn-accent { background: var(--accent); color: white; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .btn-accent:hover { background: #b71c1c; }
+    .btn-success { background: var(--success); color: white; }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    .btn-outline:hover { background: var(--bg); }
+    
+    .form-group { margin-bottom: 1rem; }
+    .form-group label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem; color: var(--text-muted); }
+    .form-control { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 6px; font-family: inherit; font-size: 0.95rem; }
+    .form-control:focus { outline: none; border-color: var(--primary-light); box-shadow: 0 0 0 3px rgba(21,101,192,0.1); }
+    
+    .badge { padding: 0.25rem 0.5rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; display: inline-block; }
+    .badge-gov { background: var(--gov-bg); color: var(--gov-text); }
+    .badge-pvt { background: var(--pvt-bg); color: var(--pvt-text); }
+    .badge-char { background: var(--char-bg); color: var(--char-text); }
+    .badge-critical { background: #ffebee; color: var(--accent); border: 1px solid #ffcdd2; }
+    .badge-serious { background: #fff3e0; color: var(--warning); border: 1px solid #ffe0b2; }
+    .badge-moderate { background: #e8f5e9; color: var(--success); border: 1px solid #c8e6c9; }
+    
+    .pulse-alert { animation: pulse 2s infinite; border-color: var(--accent); box-shadow: 0 0 0 0 rgba(211, 47, 47, 0.4); }
+
+    /* Map */
+    .map-container { height: 400px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); position: sticky; top: 80px; }
+    
+    /* Specific Layouts */
+    .amb-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 2rem; }
+    .hosp-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 2rem; }
+    
+    /* Emergency Chips */
+    .chips { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+    .chip { padding: 0.5rem 1rem; border-radius: 20px; border: 1px solid var(--border); background: white; cursor: pointer; transition: all 0.2s; font-size: 0.875rem; }
+    .chip.selected { background: var(--primary); color: white; border-color: var(--primary); }
+
+    /* Table */
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.875rem; }
+    th { color: var(--text-muted); font-weight: 500; background: var(--bg); }
+    
+    /* Toast */
+    #toast-container { position: fixed; bottom: 2rem; right: 2rem; z-index: 9999; display: flex; flex-direction: column; gap: 0.5rem; }
+    .toast { background: #333; color: white; padding: 1rem 1.5rem; border-radius: 8px; box-shadow: var(--shadow); transform: translateX(100%); opacity: 0; transition: all 0.3s; }
+    .toast.show { transform: translateX(0); opacity: 1; }
+
+    /* Utilities */
+    .text-center { text-align: center; }
+    .text-right { text-align: right; }
+    .text-sm { font-size: 0.875rem; }
+    .mt-1 { margin-top: 1rem; }
+    .mb-1 { margin-bottom: 1rem; }
+    .flex-between { display: flex; justify-content: space-between; align-items: center; }
+    
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(211, 47, 47, 0.4); }
+      70% { box-shadow: 0 0 0 15px rgba(211, 47, 47, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(211, 47, 47, 0); }
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    
+    @media (max-width: 900px) {
+      .amb-layout, .hosp-layout { grid-template-columns: 1fr; }
+      header { flex-direction: column; gap: 1rem; }
+      .nav-tabs { flex-wrap: wrap; justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="app-container">
+  <header>
+    <div class="logo">
+      <div style="font-size: 2rem;">🚑</div>
+      <div>
+        <h1>CareLink</h1>
+        <p>Emergency Hospital Coordination Network</p>
+      </div>
+    </div>
+    <div class="nav-tabs">
+      <button class="nav-tab active" data-tab="ambulance">🚑 Ambulance</button>
+      <button class="nav-tab" data-tab="hospital">🏥 Hospital</button>
+      <button class="nav-tab" data-tab="doctor">👨‍⚕️ Doctor</button>
+      <button class="nav-tab" data-tab="admin">📊 Admin</button>
+    </div>
+    <div class="status-bar">
+      <div class="status-dot" id="network-dot"></div>
+      <span id="network-text">Live</span>
+      <button class="toggle-btn" id="btn-toggle-network">Go Offline</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- AMBULANCE VIEW -->
+    <section id="view-ambulance" class="view-section active">
+      <div class="amb-layout">
+        <div class="main-col">
+          
+          <div class="card" id="location-banner">
+            <div class="flex-between">
+              <div>
+                <strong>📍 Current Location:</strong> <span id="amb-loc-text">Locating...</span>
+              </div>
+              <div style="display:flex; gap:0.5rem;">
+                <select id="amb-city-select" class="form-control" style="width:auto;">
+                  <option value="">Auto-detect City</option>
+                </select>
+                <button class="btn btn-outline" id="btn-locate">Locate Me</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" id="new-emergency-panel">
+            <h2 class="card-title">New Emergency Request</h2>
+            
+            <div class="form-group">
+              <label>Emergency Type</label>
+              <div class="chips" id="emergency-type-chips"></div>
+            </div>
+            
+            <div class="form-group">
+              <label>Severity</label>
+              <div class="chips">
+                <div class="chip severity-chip badge-critical" data-sev="Critical">Critical</div>
+                <div class="chip severity-chip badge-serious" data-sev="Serious">Serious</div>
+                <div class="chip severity-chip badge-moderate" data-sev="Moderate">Moderate</div>
+              </div>
+            </div>
+            
+            <div class="grid-2 mt-1">
+              <div class="form-group">
+                <label>Patient Age & Sex</label>
+                <input type="text" id="pt-demographics" class="form-control" placeholder="e.g. 45M">
+              </div>
+              <div class="form-group">
+                <label>Minutes since incident</label>
+                <input type="number" id="pt-time" class="form-control" value="0">
+              </div>
+            </div>
+            
+            <div class="grid-4 mt-1">
+              <div class="form-group"><label>Heart Rate</label><input type="text" id="pt-hr" class="form-control" placeholder="bpm"></div>
+              <div class="form-group"><label>BP</label><input type="text" id="pt-bp" class="form-control" placeholder="mmHg"></div>
+              <div class="form-group"><label>SpO2</label><input type="text" id="pt-spo2" class="form-control" placeholder="%"></div>
+              <div class="form-group"><label>GCS</label><input type="text" id="pt-gcs" class="form-control" placeholder="3-15"></div>
+            </div>
+            
+            <div class="form-group mt-1">
+              <label>Mechanism / Notes</label>
+              <input type="text" id="pt-notes" class="form-control" placeholder="Details of injury or condition...">
+            </div>
+            
+            <button class="btn btn-accent" style="width: 100%; padding: 1rem; font-size: 1.25rem;" id="btn-find-hospital">
+              FIND BEST HOSPITAL
+            </button>
+          </div>
+
+          <div id="hospital-results-panel" style="display:none;">
+            <div class="flex-between mb-1">
+              <h2 class="card-title" style="margin:0;">Matching Hospitals</h2>
+              <button class="btn btn-outline" id="btn-back-form">Back</button>
+            </div>
+            <div id="hospital-results-list"></div>
+          </div>
+          
+          <div id="active-cases-amb-panel"></div>
+
+        </div>
+        <div class="side-col">
+          <div class="map-container" id="amb-map"></div>
+          <div class="card mt-1">
+            <h3 class="card-title" style="font-size:1rem;">Emergency Contacts</h3>
+            <div style="display:flex; flex-wrap:wrap; gap:0.5rem; font-size:0.875rem;">
+              <span class="badge" style="background:#ddd;color:#333;">Edhi 115</span>
+              <span class="badge" style="background:#ddd;color:#333;">Chhipa 1020</span>
+              <span class="badge" style="background:#ddd;color:#333;">Rescue 1122</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- HOSPITAL VIEW -->
+    <section id="view-hospital" class="view-section">
+      <div class="card mb-1">
+        <div class="flex-between">
+          <div style="display:flex; align-items:center; gap:1rem;">
+            <label style="font-weight:600;">Current Hospital:</label>
+            <select id="hosp-select" class="form-control" style="width:300px;"></select>
+          </div>
+          <div>
+            <span id="hosp-trust-badge" class="badge" style="background:var(--success); color:white;">Trust: --%</span>
+            <button class="btn btn-outline" onclick="requestNotification()">Enable Alerts</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="hosp-layout">
+        <div class="main-col">
+          <h2 class="card-title">Incoming Emergencies</h2>
+          <div id="hosp-incoming-list"></div>
+          
+          <h2 class="card-title mt-1">Active Cases</h2>
+          <div id="hosp-active-list"></div>
+        </div>
+        <div class="side-col">
+          <div class="card">
+            <h3 class="card-title">Ward Status</h3>
+            <div id="hosp-wards-list"></div>
+          </div>
+          <div class="card">
+            <h3 class="card-title">Staffing</h3>
+            <div class="flex-between mb-1">
+              <span>Nurses</span>
+              <div style="display:flex; gap:0.5rem; align-items:center;">
+                <button class="btn btn-outline" style="padding:0.2rem 0.5rem" onclick="updateStaff('nurses',-1)">-</button>
+                <span id="hosp-nurses-count">0</span>
+                <button class="btn btn-outline" style="padding:0.2rem 0.5rem" onclick="updateStaff('nurses',1)">+</button>
+              </div>
+            </div>
+            <div class="flex-between mb-1">
+              <span>Technicians</span>
+              <div style="display:flex; gap:0.5rem; align-items:center;">
+                <button class="btn btn-outline" style="padding:0.2rem 0.5rem" onclick="updateStaff('techs',-1)">-</button>
+                <span id="hosp-techs-count">0</span>
+                <button class="btn btn-outline" style="padding:0.2rem 0.5rem" onclick="updateStaff('techs',1)">+</button>
+              </div>
+            </div>
+            <button class="btn btn-outline" style="width:100%" id="btn-toggle-divert">Toggle Divert Status</button>
+          </div>
+          <div class="card">
+            <h3 class="card-title">Equipment Status</h3>
+            <div id="hosp-equip-list" style="display:flex; flex-wrap:wrap; gap:0.5rem;"></div>
+          </div>
+          <div class="card">
+            <h3 class="card-title">Doctor Roster</h3>
+            <div style="max-height:300px; overflow-y:auto;">
+              <table id="hosp-doc-table" style="width:100%; font-size:0.875rem;">
+                <thead><tr><th style="text-align:left;padding:0.5rem;">Doctor</th><th style="text-align:left;padding:0.5rem;">Specialization</th><th style="text-align:left;padding:0.5rem;">Status</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <h3 class="card-title">Transfer Request</h3>
+            <div class="form-group"><label>Requirement</label><input type="text" id="transfer-req" class="form-control" placeholder="e.g. Neurosurgery"></div>
+            <div class="form-group"><label>Reason</label><input type="text" id="transfer-reason" class="form-control" placeholder="e.g. Specialist unavailable"></div>
+            <button class="btn btn-primary" style="width:100%" onclick="searchTransfer()">Search Network</button>
+            <div id="transfer-results" class="mt-1"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- DOCTOR VIEW -->
+    <section id="view-doctor" class="view-section">
+      <div class="card">
+        <h2 class="card-title">Doctor Portal</h2>
+        <div class="flex-between mb-1">
+          <select id="doc-hosp-select" class="form-control" style="width:250px;">
+             <option value="">Select Hospital...</option>
+          </select>
+          <select id="doc-select" class="form-control" style="width:250px;">
+             <option value="">Select Doctor Profile...</option>
+          </select>
+        </div>
+        <div class="flex-between" style="border-top:1px solid var(--border); padding-top:1rem;">
+          <div>Status: <span id="doc-status-text" class="badge" style="background:#eee;">Select profile</span></div>
+          <div>
+            <button class="btn btn-outline" onclick="setDocStatus('onsite')">On-Site</button>
+            <button class="btn btn-outline" onclick="setDocStatus('oncall')">On-Call</button>
+            <button class="btn btn-outline" onclick="setDocStatus('busy')">Busy</button>
+          </div>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div>
+          <h3 class="card-title">Emergency Alerts</h3>
+          <div id="doc-alerts"></div>
+        </div>
+        <div>
+          <h3 class="card-title">My Active Cases</h3>
+          <div id="doc-cases"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ADMIN VIEW -->
+    <section id="view-admin" class="view-section">
+      <div class="grid-4 mb-1">
+        <div class="card text-center">
+          <div style="font-size:2rem; font-weight:700; color:var(--primary)" id="adm-tot-hosp">0</div>
+          <div class="text-sm text-muted">Total Hospitals</div>
+        </div>
+        <div class="card text-center">
+          <div style="font-size:2rem; font-weight:700; color:var(--accent)" id="adm-act-emerg">0</div>
+          <div class="text-sm text-muted">Active Emergencies</div>
+        </div>
+        <div class="card text-center">
+          <div style="font-size:2rem; font-weight:700; color:var(--success)" id="adm-avg-resp">--</div>
+          <div class="text-sm text-muted">Avg Response (min)</div>
+        </div>
+        <div class="card text-center">
+          <div style="font-size:2rem; font-weight:700; color:var(--warning)" id="adm-diverts">0</div>
+          <div class="text-sm text-muted">Hospitals Diverted</div>
+        </div>
+      </div>
+      
+      <div class="card" style="height:400px; padding:0;">
+        <div id="admin-map" style="height:100%; width:100%; border-radius:var(--radius);"></div>
+      </div>
+      
+      <div class="card mt-1">
+        <div class="flex-between">
+           <h3 class="card-title">Hospital Network</h3>
+           <button class="btn btn-outline" onclick="resetDemo()">Reset Demo Data</button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table id="admin-hosp-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>City</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Trust</th>
+                <th>Last Update</th>
+                <th>Verify</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3 class="card-title">Register New Hospital</h3>
+          <div class="grid-2">
+            <div class="form-group"><label>Hospital Name</label><input type="text" id="reg-name" class="form-control" placeholder="Hospital name"></div>
+            <div class="form-group"><label>City</label><select id="reg-city" class="form-control"><option>Karachi</option><option>Lahore</option><option>Islamabad</option><option>Peshawar</option><option>Quetta</option><option>Faisalabad</option><option>Multan</option><option>Rawalpindi</option><option>Hyderabad</option><option>Sukkur</option></select></div>
+            <div class="form-group"><label>Type</label><select id="reg-type" class="form-control"><option>Government</option><option>Private</option><option>Charitable</option></select></div>
+            <div class="form-group"><label>Size</label><select id="reg-size" class="form-control"><option value="1">Small</option><option value="2" selected>Medium</option><option value="3">Large</option></select></div>
+            <div class="form-group"><label>Latitude</label><input type="number" id="reg-lat" class="form-control" step="0.0001" value="24.8607"></div>
+            <div class="form-group"><label>Longitude</label><input type="number" id="reg-lng" class="form-control" step="0.0001" value="67.0011"></div>
+          </div>
+          <h4 style="font-size:0.875rem; color:var(--text-muted); margin:0.5rem 0;">Capabilities</h4>
+          <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-bottom:1rem;">
+            <label><input type="checkbox" id="reg-ct" checked> CT Scanner</label>
+            <label><input type="checkbox" id="reg-ot" checked> Operating Room</label>
+            <label><input type="checkbox" id="reg-cath"> Cath Lab</label>
+            <label><input type="checkbox" id="reg-burn"> Burn Unit</label>
+            <label><input type="checkbox" id="reg-neuro"> Neurosurgery</label>
+            <label><input type="checkbox" id="reg-cardio"> Cardiology</label>
+            <label><input type="checkbox" id="reg-surgeon"> Trauma Surgery</label>
+          </div>
+          <button class="btn btn-primary" style="width:100%" onclick="registerHospital()">Register Hospital (Pending Verification)</button>
+        </div>
+        
+        <div class="card">
+          <h3 class="card-title">Audit Trail <span class="text-sm text-muted">(Last 30 events)</span></h3>
+          <div style="max-height:400px; overflow-y:auto;">
+            <table id="audit-table" style="width:100%; font-size:0.8rem;">
+              <thead><tr><th style="text-align:left;padding:0.4rem;">Time</th><th style="text-align:left;padding:0.4rem;">Actor</th><th style="text-align:left;padding:0.4rem;">Action</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+// --- CONSTANTS ---
+const HOSPITALS = [
+  ['Aga Khan University Hospital','Karachi','Private',24.8918,67.0742,3,'caonrs'],
+  ['Jinnah Postgraduate Medical Centre','Karachi','Government',24.8509,67.0455,3,'cobnrs'],
+  ['Civil Hospital Karachi','Karachi','Government',24.8587,67.0104,3,'cobnrs'],
+  ['NICVD','Karachi','Government',24.8625,67.0370,2,'car'],
+  ['Liaquat National Hospital','Karachi','Private',24.8929,67.0693,3,'caonrs'],
+  ['South City Hospital','Karachi','Private',24.8186,67.0356,2,'caors'],
+  ['Ziauddin Hospital Clifton','Karachi','Private',24.8164,67.0286,2,'caonrs'],
+  ['Teaching Hospital Sukkur','Sukkur','Government',27.7037,68.8595,2,'conrs'],
+  ['Civil Hospital Sukkur','Sukkur','Government',27.7081,68.8520,1,'os'],
+  ['Mayo Hospital','Lahore','Government',31.5736,74.3190,3,'cobnrs'],
+  ['Jinnah Hospital Lahore','Lahore','Government',31.4829,74.2995,3,'cobnrs'],
+  ['Services Hospital','Lahore','Government',31.5360,74.3330,2,'cons'],
+  ['Punjab Institute of Cardiology','Lahore','Government',31.5330,74.3230,2,'car'],
+  ['PIMS Islamabad','Islamabad','Government',33.7059,73.0507,3,'cabonrs'],
+  ['Shifa International Hospital','Islamabad','Private',33.6861,73.0635,3,'caonrs'],
+  ['Polyclinic Hospital','Islamabad','Government',33.6990,73.0680,2,'cors'],
+  ['Abbasi Shaheed Hospital','Karachi','Government',24.9206,67.0376,2,'cors'],
+  ['Indus Hospital Korangi','Karachi','Charitable',24.8265,67.1306,3,'cons'],
+  ['Liaquat University Hospital','Hyderabad','Government',25.3960,68.3578,3,'cobnrs'],
+  ['Chandka Medical College Hospital','Larkana','Government',27.5570,68.2140,2,'cons'],
+  ["People's Medical University Hospital",'Nawabshah','Government',26.2442,68.4100,2,'cons'],
+  ['Civil Hospital Quetta','Quetta','Government',30.1920,66.9890,2,'cons'],
+  ['Bolan Medical Complex Hospital','Quetta','Government',30.1940,67.0030,2,'cors'],
+  ['Lady Reading Hospital','Peshawar','Government',34.0050,71.5640,3,'cobnrs'],
+  ['Khyber Teaching Hospital','Peshawar','Government',33.9990,71.4880,3,'conrs'],
+  ['Hayatabad Medical Complex','Peshawar','Government',33.9780,71.4340,3,'cobnrs'],
+  ['Rehman Medical Institute','Peshawar','Private',33.9895,71.4545,3,'caonrs'],
+  ['Holy Family Hospital','Rawalpindi','Government',33.6320,73.0620,3,'cobnrs'],
+  ['Benazir Bhutto Hospital','Rawalpindi','Government',33.6330,73.0850,2,'cons'],
+  ['Rawalpindi Institute of Cardiology','Rawalpindi','Government',33.6280,73.0750,2,'car'],
+  ['Allied Hospital','Faisalabad','Government',31.4090,73.0750,3,'cobnrs'],
+  ['Faisalabad Institute of Cardiology','Faisalabad','Government',31.4210,73.0800,2,'car'],
+  ['Nishtar Hospital','Multan','Government',30.2020,71.4410,3,'cobnrs'],
+  ['Multan Institute of Cardiology','Multan','Government',30.2050,71.4600,2,'car'],
+  ['Ganga Ram Hospital','Lahore','Government',31.5560,74.3280,2,'cors'],
+  ['Doctors Hospital Lahore','Lahore','Private',31.4720,74.2760,3,'caonrs']
+];
+
+const CITY = {
+  Karachi: [24.8607, 67.0011, 'Sindh'],
+  Hyderabad: [25.3960, 68.3578, 'Sindh'],
+  Sukkur: [27.7052, 68.8574, 'Sindh'],
+  Larkana: [27.5590, 68.2120, 'Sindh'],
+  Nawabshah: [26.2483, 68.4096, 'Sindh'],
+  Quetta: [30.1798, 66.9750, 'Balochistan'],
+  Lahore: [31.5204, 74.3587, 'Punjab'],
+  Faisalabad: [31.4504, 73.1350, 'Punjab'],
+  Multan: [30.1575, 71.5249, 'Punjab'],
+  Rawalpindi: [33.5651, 73.0169, 'Punjab'],
+  Islamabad: [33.6844, 73.0479, 'ICT'],
+  Peshawar: [34.0151, 71.5249, 'KPK']
+};
+
+const EMERGENCY_TYPES = {
+  head: { label: 'Head Injury', icon:'🧠', need: ['ct','neuro','bed'], opt: ['icu'], max: 60, team: ['Trauma Bay','CT Room','Neuro OT','ICU'] },
+  cardiac: { label: 'Cardiac Emergency', icon:'🫀', need: ['cath','cardio','icu'], opt: [], max: 90, team: ['Resus Bay','Cath Lab','CCU'] },
+  stroke: { label: 'Stroke', icon:'🩸', need: ['ct','neurol','bed'], opt: [], max: 180, team: ['Resus Bay','CT Room','Stroke Ward'] },
+  trauma: { label: 'Major Trauma', icon:'💥', need: ['ct','surgeon','ot','bed'], opt: ['icu'], max: 60, team: ['Trauma Bay','CT Room','OT 1','ICU'] },
+  burn: { label: 'Burns', icon:'🔥', need: ['burn','bed'], opt: ['icu'], max: 60, team: ['Burn Unit','Burn ICU'] },
+  respiratory: { label: 'Respiratory', icon:'🫁', need: ['vent','icu'], opt: [], max: 120, team: ['Resus Bay','ICU'] },
+  pediatric: { label: 'Paediatric', icon:'👶', need: ['peds','bed'], opt: [], max: 60, team: ['Paediatric Ward','Resus Bay'] },
+  obstetric: { label: 'Obstetric', icon:'🤰', need: ['mat','bed'], opt: ['ot'], max: 60, team: ['Maternity','OT'] }
+};
+
+const ROAD_COND = {
+  clear: { label: 'Clear', speed: 40, color: '#2e7d32' },
+  heavy: { label: 'Heavy traffic', speed: 14, color: '#ef6c00' },
+  slow: { label: 'Road works', speed: 24, color: '#d4a800' },
+  block: { label: 'Closed, detour', speed: 18, color: '#d32f2f' }
+};
+
+const DOC_NAMES = ['Ahmed','Sana','Imran','Ayesha','Bilal','Hira','Omar','Fatima','Ali','Zahra'];
+const DOC_SURNAMES = ['Raza','Memon','Shaikh','Khan','Siddiqui','Rizvi','Shah','Qureshi','Malik','Chaudhry'];
+function genDocName() { return DOC_NAMES[Math.floor(Math.random()*DOC_NAMES.length)] + ' ' + DOC_SURNAMES[Math.floor(Math.random()*DOC_SURNAMES.length)]; }
+
+// --- STATE MANAGEMENT ---
+let S = {
+  hospitals: [],
+  cases: [],
+  audit: [],
+  queue: []
+};
+
+let isOnline = navigator.onLine;
+let ambLat = 24.8607, ambLng = 67.0011;
+// The interface can run as an offline demo, or connect to the local API when served by Express.
+let apiOnline = false;
+let apiToken = '';
+let apiRole = 'driver';
+let syncingOfflineQueue = false;
+const demoAccounts = { ambulance: ['driver','driver'], hospital: ['hospital','hospital'], doctor: ['doctor','doctor'], admin: ['admin','admin'] };
+async function apiRequest(path, options = {}) {
+  const response = await fetch(`/api${path}`, { ...options, headers: { 'Content-Type': 'application/json', ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}), ...(options.headers || {}) } });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
+  return body;
+}
+async function signInDemo(role = currentTab) {
+  const account = demoAccounts[role] || demoAccounts.ambulance;
+  const result = await apiRequest('/auth/login', { method: 'POST', body: JSON.stringify({ username: account[0], password: account[1] }) });
+  apiToken = result.token; apiRole = role;
+  if (window.io) {
+    if (window.networkSocket) window.networkSocket.disconnect();
+    window.networkSocket = window.io({ auth: { token: apiToken } });
+    window.networkSocket.on('connect', () => window.networkSocket.emit('join', { role: result.user.role, hospital_id: result.user.hospital_id, ambulance_id: result.user.ambulance_id }));
+    window.networkSocket.on('emergency:new', () => hydrateFromApi().then(()=>renderAll()));
+    window.networkSocket.on('emergency:update', () => hydrateFromApi().then(()=>renderAll()));
+    window.networkSocket.on('hospital:resource-update', () => hydrateFromApi().then(()=>renderAll()));
+  }
+}
+function fromDatabaseHospital(row) {
+  const resources = row.resources || [];
+  const available = name => resources.some(r => r.resource_name.toLowerCase() === name.toLowerCase() && r.available > 0);
+  const total = name => resources.find(r => r.resource_name.toLowerCase() === name.toLowerCase())?.total || 0;
+  const doctors = (row.doctors || []).map(d => ({ id:d.id, n:d.full_name, sp:d.specialization, st:d.status }));
+  const hasDoc = term => doctors.some(d => d.sp.toLowerCase().includes(term) && ['onsite','oncall'].includes(d.st));
+  const wards = resources.filter(r => ['bed','icu'].includes(r.resource_type.toLowerCase()) || /bed|icu/i.test(r.resource_name)).map(r => ({ k:/icu/i.test(r.resource_name)?'icu':'bed', n:r.resource_name, t:r.total, f:r.available }));
+  if (!wards.some(w=>w.k==='bed')) wards.push({k:'bed',n:'Emergency Bed',t:0,f:0});
+  if (!wards.some(w=>w.k==='icu')) wards.push({k:'icu',n:'ICU',t:0,f:0});
+  return { id:row.id,name:row.name,city:row.city,type:row.type,lat:row.latitude,lng:row.longitude,size:1,gate:row.gate_name||'Emergency entrance',rel:row.trust_score||80,upd:Date.parse(row.last_updated+'Z')||Date.now(),divert:!row.accepting_emergency,ver:!!row.verified,
+    r:{ct:available('CT Scanner'),cath:available('Cath Lab'),ot:available('Operating Room'),burn:available('Burn Unit'),neuro:hasDoc('neurosurgeon'),cardio:hasDoc('cardiologist'),surgeon:hasDoc('surgeon'),nurses:0,techs:0,vent:available('Ventilator'),peds:available('Pediatric Ward'),mat:available('Maternity Ward'),neurol:hasDoc('neurologist')},
+    wards,docs:doctors,road:'clear',resourceRows:resources };
+}
+async function hydrateFromApi() {
+  try {
+    await apiRequest('/health');
+    await signInDemo(currentTab);
+    const rows = await apiRequest('/hospitals');
+    const details = await Promise.all(rows.map(h => apiRequest(`/hospitals/${h.id}`).catch(()=>h)));
+    S.hospitals = details.map(fromDatabaseHospital);
+    const cases = await apiRequest('/emergencies');
+    S.cases = cases.map(c=>({id:c.id,targetHosp:c.hospital_id,type:({head_injury:'head',cardiac:'cardiac',stroke:'stroke',trauma:'trauma',burn:'burn',respiratory:'respiratory',pediatric:'pediatric',obstetric:'obstetric'})[c.emergency_type]||'trauma',sev:c.severity==='critical'?'Critical':c.severity==='serious'?'Serious':'Moderate',status:c.status==='notified'?'dispatched':c.status,demo:[c.patient_age,c.patient_sex].filter(Boolean).join('')||c.patient_name,notes:c.notes||c.mechanism||'',vitals:{hr:c.vitals_hr,bp:c.vitals_bp,spo2:c.vitals_spo2,gcs:c.vitals_gcs},ts:Date.parse(c.created_at+'Z')||Date.now(),ambLoc:[c.current_lat||c.pickup_lat,c.current_lng||c.pickup_lng],caseNumber:c.case_number}));
+    apiOnline = true; saveState(); return true;
+  } catch (error) { apiOnline = false; console.info('CareLink API unavailable; using offline demo state.', error.message); return false; }
+}
+let bc = null;
+try { bc = new BroadcastChannel('gh6'); } catch(e){}
+
+function initHospitals() {
+  if (S.hospitals.length > 0) return;
+  HOSPITALS.forEach((h, i) => {
+    let id = 'h'+i;
+    let caps = h[6];
+    let size = h[5];
+    let wards = [
+      {k:'bed', n:'Emergency Bay', t: size*10, f: Math.floor(Math.random()*size*5)},
+      {k:'resus', n:'Resus Bay', t: size*2, f: Math.floor(Math.random()*size*2)},
+      {k:'icu', n:'ICU', t: size*8, f: Math.floor(Math.random()*size*3)},
+      {k:'theatre', n:'Operation Theatres', t: size*3, f: Math.floor(Math.random()*size*2)},
+      {k:'w2', n:'Medical Ward', t: size*20, f: Math.floor(Math.random()*size*10)},
+      {k:'w3', n:'Surgical Ward', t: size*20, f: Math.floor(Math.random()*size*10)}
+    ];
+    if(caps.includes('r')) wards.push({k:'ccu', n:'CCU', t: size*5, f: Math.floor(Math.random()*size*2)});
+    if(size>1) wards.push({k:'peds', n:'Paediatric Ward', t: size*10, f: Math.floor(Math.random()*size*4)});
+    if(size>1) wards.push({k:'mat', n:'Maternity Ward', t: size*10, f: Math.floor(Math.random()*size*4)});
+    if(caps.includes('b')) wards.push({k:'burn', n:'Burn Unit', t: size*5, f: Math.floor(Math.random()*size*2)});
+    
+    let docs = [];
+    let sps = ['Emergency Physician', 'General Surgeon', 'Anaesthetist'];
+    if(caps.includes('c')) sps.push('Radiologist');
+    if(caps.includes('n')) sps.push('Neurosurgeon', 'Neurologist');
+    if(caps.includes('r')) sps.push('Cardiologist', 'Interventional Cardiologist');
+    if(caps.includes('s')) sps.push('Trauma Surgeon', 'Orthopaedic Surgeon');
+    if(caps.includes('b')) sps.push('Burn/Plastic Surgeon');
+    
+    sps.forEach(sp => {
+      let cnt = size;
+      for(let j=0; j<cnt; j++) {
+        docs.push({ id: id+'_d'+docs.length, n: 'Dr. '+genDocName(), sp: sp, st: Math.random()>0.3 ? 'onsite':'oncall' });
+      }
+    });
+    
+    S.hospitals.push({
+      id: id, name: h[0], city: h[1], type: h[2], lat: h[3], lng: h[4], size: size,
+      gate: 'Emergency entrance', rel: 85 + Math.floor(Math.random()*14),
+      upd: Date.now() - Math.floor(Math.random()*3600000), divert: false, ver: true,
+      r: { 
+        ct: caps.includes('c'), cath: caps.includes('a'), ot: caps.includes('o'), 
+        burn: caps.includes('b'), neuro: caps.includes('n'), cardio: caps.includes('r'), surgeon: caps.includes('s'),
+        nurses: size*15, techs: size*5, vent: true
+      },
+      wards: wards,
+      docs: docs,
+      road: 'clear'
+    });
+  });
+}
+
+function loadState() {
+  let raw = localStorage.getItem('gh6');
+  if (raw) {
+    let parsed = JSON.parse(raw);
+    if(parsed.hospitals && parsed.hospitals.length>0) {
+      S = parsed;
+    } else { initHospitals(); }
+  } else {
+    initHospitals();
+  }
+}
+
+function saveState() {
+  localStorage.setItem('gh6', JSON.stringify(S));
+}
+
+function apply(action, noBcast) {
+  if (!isOnline && action.type !== 'SYNC' && !noBcast) {
+    S.queue.push(action);
+    showToast('Offline: Action queued for sync', 'warning');
+  }
+  
+  if(action.type === 'NEW_CASE') {
+    S.cases.push(action.payload);
+    if(action.payload.targetHosp) {
+      if(window.currentTab==='hospital' && document.getElementById('hosp-select').value===action.payload.targetHosp) {
+         playBeep();
+      }
+    }
+  } else if (action.type === 'UPDATE_CASE_STATUS') {
+    let c = S.cases.find(x=>x.id===action.id);
+    if(c) c.status = action.status;
+  } else if (action.type === 'UPDATE_HOSP_STAFF') {
+    let h = S.hospitals.find(x=>x.id===action.id);
+    if(h) {
+      if(action.role==='nurses') h.r.nurses += action.val;
+      if(action.role==='techs') h.r.techs += action.val;
+      h.upd = Date.now();
+    }
+  } else if (action.type === 'TOGGLE_DIVERT') {
+    let h = S.hospitals.find(x=>x.id===action.id);
+    if(h) { h.divert = !h.divert; h.upd = Date.now(); }
+  } else if (action.type === 'DOC_STATUS') {
+    let h = S.hospitals.find(x=>x.id===action.hid);
+    if(h) {
+      let d = h.docs.find(x=>x.id===action.did);
+      if(d) d.st = action.st;
+      h.upd = Date.now();
+    }
+  }
+
+  if (!noBcast && isOnline && apiOnline && !syncingOfflineQueue) {
+    if (action.type === 'UPDATE_CASE_STATUS') {
+      const request = action.status === 'accepted'
+        ? apiRequest(`/emergencies/${action.id}/accept`, {method:'POST',body:JSON.stringify({})})
+        : apiRequest(`/emergencies/${action.id}/status`, {method:'PUT',body:JSON.stringify({status:action.status==='dispatched'?'notified':action.status})});
+      request.catch(e=>showToast(`Could not sync status: ${e.message}`,'warning'));
+    }
+    if (action.type === 'UPDATE_HOSP_STAFF') {
+      const h=S.hospitals.find(x=>x.id===action.id), name=action.role==='nurses'?'Nurses':'Technicians', current=h?.r[action.role]||0;
+      if(h) apiRequest(`/hospitals/${h.id}/resources`,{method:'PUT',body:JSON.stringify({resources:[{resource_type:'staff',resource_name:name,total:Math.max(0,current),available:Math.max(0,current)}]})}).catch(e=>showToast(`Could not sync staffing: ${e.message}`,'warning'));
+    }
+    if (action.type === 'TOGGLE_DIVERT') { const h=S.hospitals.find(x=>x.id===action.id); if(h) apiRequest(`/hospitals/${h.id}`,{method:'PUT',body:JSON.stringify({accepting_emergency:h.divert?0:1})}).catch(e=>showToast(`Could not sync hospital status: ${e.message}`,'warning')); }
+    if (action.type === 'DOC_STATUS') apiRequest(`/doctors/${action.did}/status`,{method:'PUT',body:JSON.stringify({status:action.st})}).catch(e=>showToast(`Could not sync doctor status: ${e.message}`,'warning'));
+    if (action.type === 'RESOURCE_UPDATE') apiRequest(`/hospitals/${action.hospitalId}/resources`,{method:'PUT',body:JSON.stringify({resources:[action.resource]})}).catch(e=>showToast(`Could not sync resource: ${e.message}`,'warning'));
+  }
+  
+  if(!noBcast) {
+    saveState();
+    if(bc && isOnline) bc.postMessage(action);
+    renderAll();
+  }
+}
+
+async function syncQueuedAction(action) {
+  if (action.type === 'NEW_CASE') {
+    await signInDemo('ambulance');
+    const c=action.payload, h=S.hospitals.find(x=>x.id===c.targetHosp);
+    const typeMap={head:'head_injury',cardiac:'cardiac',stroke:'stroke',trauma:'trauma',burn:'burn',respiratory:'respiratory',pediatric:'pediatric',obstetric:'obstetric'};
+    const distance=h?haversine(c.ambLoc[0],c.ambLoc[1],h.lat,h.lng):null;
+    const result=await apiRequest('/emergencies',{method:'POST',body:JSON.stringify({emergency_type:typeMap[c.type]||'trauma',severity:(c.sev||'moderate').toLowerCase(),target_hospital_id:c.targetHosp,pickup_lat:c.ambLoc[0],pickup_lng:c.ambLoc[1],distance_km:distance,eta_minutes:distance?Math.max(1,Math.round(distance/35*60)):null,notes:c.notes})});
+    c.id=result.id;c.caseNumber=result.case_number;return;
+  }
+  if(action.type==='UPDATE_CASE_STATUS') {
+    const isHospitalAction=['accepted','declined','treatment_started'].includes(action.status);
+    await signInDemo(isHospitalAction?'hospital':'ambulance');
+    if(action.status==='accepted') await apiRequest(`/emergencies/${action.id}/accept`,{method:'POST',body:JSON.stringify({})});
+    else await apiRequest(`/emergencies/${action.id}/status`,{method:'PUT',body:JSON.stringify({status:action.status})});
+  }
+  if(action.type==='UPDATE_HOSP_STAFF') { await signInDemo('hospital'); const h=S.hospitals.find(x=>x.id===action.id), name=action.role==='nurses'?'Nurses':'Technicians', current=h?.r[action.role]||0; await apiRequest(`/hospitals/${action.id}/resources`,{method:'PUT',body:JSON.stringify({resources:[{resource_type:'staff',resource_name:name,total:Math.max(0,current),available:Math.max(0,current)}]})}); }
+  if(action.type==='TOGGLE_DIVERT') { await signInDemo('hospital'); const h=S.hospitals.find(x=>x.id===action.id); await apiRequest(`/hospitals/${h.id}`,{method:'PUT',body:JSON.stringify({accepting_emergency:h.divert?0:1})}); }
+  if(action.type==='DOC_STATUS') { await signInDemo('doctor'); await apiRequest(`/doctors/${action.did}/status`,{method:'PUT',body:JSON.stringify({status:action.st})}); }
+  if(action.type==='RESOURCE_UPDATE') { await signInDemo('hospital'); await apiRequest(`/hospitals/${action.hospitalId}/resources`,{method:'PUT',body:JSON.stringify({resources:[action.resource]})}); }
+  if(action.type==='TRANSFER_REQUEST') { await signInDemo('hospital'); await apiRequest('/transfers',{method:'POST',body:JSON.stringify({to_hospital_id:action.toHospitalId,reason:action.reason,requirements:action.requirements})}); }
+}
+async function flushOfflineQueue() {
+  if (!apiOnline || !isOnline || !S.queue.length || syncingOfflineQueue) return;
+  syncingOfflineQueue=true;
+  const pending=[...S.queue];
+  try { for (const action of pending) await syncQueuedAction(action); S.queue=[]; saveState(); showToast('Offline updates synced to the emergency network'); }
+  catch(error) { showToast(`Some offline updates remain queued: ${error.message}`,'warning'); }
+  finally { syncingOfflineQueue=false;renderNetwork(); }
+}
+
+if(bc) {
+  bc.onmessage = (e) => {
+    apply(e.data, true);
+    renderAll();
+  };
+}
+
+// --- UTILS ---
+function haversine(lat1, lng1, lat2, lng2) {
+  const R = 6371, r = Math.PI/180;
+  const x = (lat2-lat1)*r, y = (lng2-lng1)*r;
+  const a = Math.sin(x/2)**2 + Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(y/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
+function timeAgo(ts) {
+  let min = Math.floor((Date.now()-ts)/60000);
+  if(min<1) return 'Just now';
+  if(min<60) return min+' min ago';
+  return Math.floor(min/60)+' hr ago';
+}
+function showToast(msg, type='info') {
+  let c = document.getElementById('toast-container');
+  let t = document.createElement('div');
+  t.className = 'toast show';
+  if(type==='warning') t.style.background = 'var(--warning)';
+  if(type==='error') t.style.background = 'var(--accent)';
+  t.innerText = msg;
+  c.appendChild(t);
+  setTimeout(()=> { t.classList.remove('show'); setTimeout(()=>t.remove(),300); }, 3000);
+}
+function playBeep() {
+  try {
+    let ctx = new (window.AudioContext || window.webkitAudioContext)();
+    let osc = ctx.createOscillator();
+    osc.type = 'sine'; osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.connect(ctx.destination);
+    osc.start(); osc.stop(ctx.currentTime + 0.5);
+  } catch(e){}
+}
+function requestNotification() {
+  if (Notification.permission !== 'granted') Notification.requestPermission();
+  showToast("Desktop alerts enabled");
+}
+function resetDemo() {
+  localStorage.removeItem('gh6');
+  S = {hospitals:[],cases:[],audit:[],queue:[]};
+  initHospitals(); saveState(); renderAll(); showToast("Demo reset");
+}
+
+// --- MAPS ---
+let mapAmb, mapHosp, mapAdmin;
+let markerAmb;
+let hospMarkersAmb = {};
+
+function initMaps() {
+  if(document.getElementById('amb-map').innerHTML==="") {
+    mapAmb = L.map('amb-map').setView([ambLat, ambLng], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapAmb);
+    markerAmb = L.marker([ambLat, ambLng]).addTo(mapAmb).bindPopup('Ambulance');
+  }
+  if(document.getElementById('admin-map').innerHTML==="") {
+    mapAdmin = L.map('admin-map').setView([30.3753, 69.3451], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapAdmin);
+  }
+}
+
+function updateAmbMap() {
+  if(!mapAmb) return;
+  markerAmb.setLatLng([ambLat, ambLng]);
+  mapAmb.setView([ambLat, ambLng], 12);
+  
+  Object.values(hospMarkersAmb).forEach(m=>mapAmb.removeLayer(m));
+  hospMarkersAmb = {};
+  
+  S.hospitals.forEach(h => {
+    let col = h.type==='Government'?'#0b5cad':h.type==='Private'?'#7b3fa0':'#1b7f45';
+    let m = L.circleMarker([h.lat, h.lng], {color: h.divert?'red':col, fillColor: col, fillOpacity: 0.8, radius: 8}).addTo(mapAmb);
+    m.bindPopup(`<b>${h.name}</b><br>${h.type}`);
+    hospMarkersAmb[h.id] = m;
+  });
+}
+
+function updateAdminMap() {
+  if(!mapAdmin) return;
+  mapAdmin.eachLayer(l=>{ if(l instanceof L.CircleMarker) mapAdmin.removeLayer(l); });
+  S.hospitals.forEach(h => {
+    let col = h.type==='Government'?'#0b5cad':h.type==='Private'?'#7b3fa0':'#1b7f45';
+    L.circleMarker([h.lat, h.lng], {color: h.divert?'red':col, fillColor: col, fillOpacity: 0.8, radius: 6}).addTo(mapAdmin)
+     .bindPopup(h.name);
+  });
+}
+
+// --- CORE LOGIC ---
+let selectedEType = null;
+let currentTab = 'ambulance';
+
+function initUI() {
+  // Tabs
+  document.querySelectorAll('.nav-tab').forEach(b => {
+    b.addEventListener('click', (e) => {
+      document.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));
+      e.target.classList.add('active');
+      document.querySelectorAll('.view-section').forEach(x=>x.classList.remove('active'));
+      currentTab = e.target.dataset.tab;
+      if (apiOnline && apiRole !== currentTab) signInDemo(currentTab).catch(err=>showToast(`Demo role sign-in failed: ${err.message}`,'error'));
+      document.getElementById('view-'+currentTab).classList.add('active');
+      renderAll();
+      if(currentTab==='ambulance' && mapAmb) mapAmb.invalidateSize();
+      if(currentTab==='admin' && mapAdmin) mapAdmin.invalidateSize();
+    });
+  });
+  
+  // Network toggle
+  document.getElementById('btn-toggle-network').addEventListener('click', ()=>{
+    isOnline = !isOnline;
+    renderNetwork();
+    if(isOnline) flushOfflineQueue();
+  });
+  
+  window.addEventListener('online', ()=>{isOnline=true; renderNetwork(); flushOfflineQueue();});
+  window.addEventListener('offline', ()=>{isOnline=false; renderNetwork();});
+
+  // Amb UI setup
+  let csel = document.getElementById('amb-city-select');
+  Object.keys(CITY).forEach(c => {
+    let opt = document.createElement('option'); opt.value = c; opt.innerText = c; csel.appendChild(opt);
+  });
+  csel.addEventListener('change', e=>{
+    if(e.target.value && CITY[e.target.value]) {
+      ambLat = CITY[e.target.value][0]; ambLng = CITY[e.target.value][1];
+      document.getElementById('amb-loc-text').innerText = e.target.value;
+      updateAmbMap();
+    }
+  });
+
+  let echips = document.getElementById('emergency-type-chips');
+  Object.keys(EMERGENCY_TYPES).forEach(k => {
+    let d = document.createElement('div');
+    d.className = 'chip'; d.innerText = EMERGENCY_TYPES[k].icon + ' ' + EMERGENCY_TYPES[k].label;
+    d.onclick = () => {
+      Array.from(echips.children).forEach(x=>x.classList.remove('selected'));
+      d.classList.add('selected');
+      selectedEType = k;
+    };
+    echips.appendChild(d);
+  });
+  
+  document.querySelectorAll('.severity-chip').forEach(c => {
+    c.onclick = () => {
+      document.querySelectorAll('.severity-chip').forEach(x=>x.classList.remove('selected'));
+      c.classList.add('selected');
+    }
+  });
+
+  document.getElementById('btn-find-hospital').addEventListener('click', findHospital);
+  document.getElementById('btn-back-form').addEventListener('click', ()=>{
+    document.getElementById('hospital-results-panel').style.display='none';
+    document.getElementById('new-emergency-panel').style.display='block';
+  });
+  
+  document.getElementById('btn-locate').addEventListener('click', ()=>{
+    document.getElementById('amb-loc-text').innerText = "Locating via IP...";
+    fetch('https://ipwho.is/').then(r=>r.json()).then(d=>{
+      if(d.success) {
+        ambLat = d.latitude; ambLng = d.longitude;
+        document.getElementById('amb-loc-text').innerText = `${d.city}, ${d.region}`;
+        updateAmbMap();
+      }
+    }).catch(()=>{ document.getElementById('amb-loc-text').innerText = "Failed"; });
+  });
+
+  // Hosp UI setup
+  let hsel = document.getElementById('hosp-select');
+  hsel.addEventListener('change', renderHospView);
+  
+  let dhsel = document.getElementById('doc-hosp-select');
+  dhsel.addEventListener('change', () => {
+    let dsel = document.getElementById('doc-select');
+    dsel.innerHTML = '<option value="">Select Doctor Profile...</option>';
+    let h = S.hospitals.find(x=>x.id===dhsel.value);
+    if(h) {
+      h.docs.forEach(d => {
+        let opt = document.createElement('option'); opt.value = d.id; opt.innerText = d.n + ' ('+d.sp+')';
+        dsel.appendChild(opt);
+      });
+    }
+  });
+  document.getElementById('doc-select').addEventListener('change', renderDocView);
+  
+  document.getElementById('btn-toggle-divert').addEventListener('click', ()=>{
+    let hid = document.getElementById('hosp-select').value;
+    if(hid) apply({type:'TOGGLE_DIVERT', id:hid});
+  });
+  
+  setInterval(() => { renderAll(); }, 30000);
+}
+
+function renderNetwork() {
+  let dot = document.getElementById('network-dot');
+  let txt = document.getElementById('network-text');
+  let btn = document.getElementById('btn-toggle-network');
+  if(isOnline) {
+    dot.className = 'status-dot'; txt.innerText = 'Live'; btn.innerText = 'Go Offline';
+  } else {
+    dot.className = 'status-dot offline'; txt.innerText = 'Offline ('+S.queue.length+')'; btn.innerText = 'Go Online';
+  }
+}
+
+async function findHospital() {
+  if(!selectedEType) { showToast('Select emergency type', 'error'); return; }
+  let sev = document.querySelector('.severity-chip.selected');
+  if(!sev) { showToast('Select severity', 'error'); return; }
+  
+  let et = EMERGENCY_TYPES[selectedEType];
+  
+  let results = S.hospitals.map(h => {
+    let d = haversine(ambLat, ambLng, h.lat, h.lng);
+    let speed = ROAD_COND[h.road].speed;
+    let eta = Math.round((d / speed) * 60); // minutes
+    
+    let score = 100;
+    let missing = [];
+    et.need.forEach(req => {
+      if(h.r[req]===false || h.r[req]===0) { score -= 30; missing.push(req); }
+      // check beds if req is 'bed' or 'icu'
+      if(req==='bed') { let wb=h.wards.find(w=>w.k==='bed'); if(!wb || wb.f===0) { score-=20; missing.push('Beds Full'); } }
+      if(req==='icu') { let wi=h.wards.find(w=>w.k==='icu'); if(!wi || wi.f===0) { score-=20; missing.push('ICU Full'); } }
+    });
+    
+    if(h.divert) score -= 50;
+    if((Date.now()-h.upd) > 3600000) score -= 10; // stale data
+    
+    score -= (eta * 0.5); // distance penalty
+    
+    return { h, d, eta, score, missing };
+  }).sort((a,b)=>b.score - a.score);
+
+  if(apiOnline && isOnline) {
+    try {
+      const typeMap={head:'head_injury',cardiac:'cardiac',stroke:'stroke',trauma:'trauma',burn:'burn',respiratory:'respiratory',pediatric:'pediatric',obstetric:'obstetric'};
+      const matches=await apiRequest(`/emergencies/find-hospital?emergency_type=${encodeURIComponent(typeMap[selectedEType])}&lat=${ambLat}&lng=${ambLng}`);
+      if(matches.length) results=matches.map(match=>{
+        const h=S.hospitals.find(item=>item.id===match.hospital.id);
+        return h?{h,d:Number(match.distance_km),eta:match.travel_time_mins,score:Number(match.score),missing:match.reasons.filter(reason=>reason.includes('NOT available'))}:null;
+      }).filter(Boolean);
+    } catch(error) { showToast(`Using cached hospital matching: ${error.message}`,'warning'); }
+  }
+  
+  let list = document.getElementById('hospital-results-list');
+  list.innerHTML = '';
+  
+  results.slice(0,5).forEach((res, idx) => {
+    let h = res.h;
+    let card = document.createElement('div');
+    card.className = 'card';
+    if(idx===0) card.style.borderColor = 'var(--primary)';
+    
+    let bclass = h.type==='Government'?'badge-gov':h.type==='Private'?'badge-pvt':'badge-char';
+    let mhtml = res.missing.length>0 ? `<div style="color:var(--accent);font-size:0.875rem;margin-top:0.5rem;">✗ Missing: ${res.missing.join(', ')}</div>` : `<div style="color:var(--success);font-size:0.875rem;margin-top:0.5rem;">✓ Fully Capable</div>`;
+    
+    let whtml = '';
+    if(h.divert) whtml += `<span class="badge badge-critical">DIVERTING</span> `;
+    if((Date.now()-h.upd)>1800000) whtml += `<span class="badge badge-serious">Stale Data</span>`;
+    
+    card.innerHTML = `
+      <div class="flex-between">
+        <div>
+          <h3 style="margin:0; font-size:1.1rem;">${h.name}</h3>
+          <span class="badge ${bclass}">${h.type}</span>
+          ${whtml}
+        </div>
+        <div class="text-right">
+          <div style="font-size:1.25rem; font-weight:700; color:var(--primary)">${res.eta} min</div>
+          <div class="text-sm text-muted">${res.d.toFixed(1)} km away</div>
+        </div>
+      </div>
+      ${mhtml}
+      <div class="flex-between mt-1">
+        <div class="text-sm text-muted">Trust: ${h.rel}% • Upd: ${timeAgo(h.upd)}</div>
+        <button class="btn btn-primary" onclick="bookEmergency('${h.id}')" ${h.divert?'disabled':''}>Book & Send</button>
+      </div>
+    `;
+    list.appendChild(card);
+  });
+  
+  document.getElementById('new-emergency-panel').style.display = 'none';
+  document.getElementById('hospital-results-panel').style.display = 'block';
+}
+
+async function bookEmergency(hid) {
+  let cid = 'c_' + Date.now();
+  let sev = document.querySelector('.severity-chip.selected').dataset.sev;
+  let caseObj = {
+    id: cid, targetHosp: hid, type: selectedEType, sev: sev, status: 'dispatched',
+    demo: document.getElementById('pt-demographics').value,
+    notes: document.getElementById('pt-notes').value,
+    vitals: {
+      hr: document.getElementById('pt-hr').value, bp: document.getElementById('pt-bp').value,
+      spo2: document.getElementById('pt-spo2').value, gcs: document.getElementById('pt-gcs').value
+    },
+    ts: Date.now(),
+    ambLoc: [ambLat, ambLng]
+  };
+  if (apiOnline && isOnline) {
+    try {
+      const [age, sex] = (caseObj.demo || '').match(/^(\d+)\s*([A-Za-z]+)?$/)?.slice(1) || [];
+      const typeMap = {head:'head_injury',cardiac:'cardiac',stroke:'stroke',trauma:'trauma',burn:'burn',respiratory:'respiratory',pediatric:'pediatric',obstetric:'obstetric'};
+      const distance = haversine(ambLat,ambLng,S.hospitals.find(h=>h.id===hid).lat,S.hospitals.find(h=>h.id===hid).lng);
+      const result = await apiRequest('/emergencies',{method:'POST',body:JSON.stringify({emergency_type:typeMap[selectedEType],severity:sev.toLowerCase(),patient_age:age?Number(age):null,patient_sex:sex||null,target_hospital_id:hid,eta_minutes:Math.max(1,Math.round(distance/35*60)),distance_km:Number(distance.toFixed(2)),pickup_lat:ambLat,pickup_lng:ambLng,mechanism:caseObj.notes,notes:caseObj.notes,vitals_hr:caseObj.vitals.hr,vitals_bp:caseObj.vitals.bp,vitals_spo2:caseObj.vitals.spo2,vitals_gcs:caseObj.vitals.gcs})});
+      caseObj.id = result.id; caseObj.caseNumber = result.case_number; caseObj.status = 'dispatched';
+      apply({type:'NEW_CASE', payload:caseObj});
+      if (window.networkSocket) window.networkSocket.emit('emergency:new', {id:result.id,case_number:result.case_number,hospital_id:hid});
+    } catch (error) { apiOnline=false; S.queue.push({type:'NEW_CASE',payload:caseObj}); showToast(`API save failed; saved to this device: ${error.message}`,'warning'); apply({type:'NEW_CASE',payload:caseObj}); }
+  } else {
+    if (!isOnline) S.queue.push({type:'NEW_CASE',payload:caseObj});
+    apply({type:'NEW_CASE', payload: caseObj});
+  }
+  let hospName = S.hospitals.find(x=>x.id===hid)?.name || hid;
+  addAudit('Ambulance Driver', `Emergency booked: ${EMERGENCY_TYPES[selectedEType].label} (${sev}) → ${hospName}`);
+  document.getElementById('hospital-results-panel').style.display = 'none';
+  document.getElementById('new-emergency-panel').style.display = 'block';
+  // clear form
+  document.querySelectorAll('input').forEach(i=>i.value='');
+  showToast("Emergency booked and dispatched!");
+}
+
+function renderAll() {
+  if(currentTab==='ambulance') renderAmbView();
+  if(currentTab==='hospital') {
+    let sel = document.getElementById('hosp-select');
+    if(sel.options.length===0) {
+      S.hospitals.forEach(h => { let o=document.createElement('option'); o.value=h.id; o.innerText=`${h.name} (${h.city})`; sel.appendChild(o); });
+    }
+    renderHospView();
+  }
+  if(currentTab==='doctor') renderDocView();
+  if(currentTab==='admin') renderAdminView();
+}
+
+function renderAmbView() {
+  let panel = document.getElementById('active-cases-amb-panel');
+  panel.innerHTML = '';
+  let active = S.cases.filter(c => c.status !== 'completed' && c.status !== 'cancelled');
+  if(active.length>0) {
+    let h2 = document.createElement('h2'); h2.className='card-title'; h2.innerText='Active Dispatches';
+    panel.appendChild(h2);
+    active.forEach(c => {
+      let h = S.hospitals.find(x=>x.id===c.targetHosp);
+      let et = EMERGENCY_TYPES[c.type];
+      let sbadge = c.sev==='Critical'?'badge-critical':c.sev==='Serious'?'badge-serious':'badge-moderate';
+      let rem = Math.max(0, et.max*60 - Math.floor((Date.now()-c.ts)/1000));
+      let mm = Math.floor(rem/60).toString().padStart(2,'0');
+      let ss = (rem%60).toString().padStart(2,'0');
+      
+      let card = document.createElement('div'); card.className = 'card ' + (c.status==='accepted'?'pulse-alert':'');
+      card.innerHTML = `
+        <div class="flex-between mb-1">
+          <div>
+            <span class="badge ${sbadge}">${c.sev}</span>
+            <span style="font-weight:600; margin-left:0.5rem;">${et.icon} ${et.label}</span>
+          </div>
+          <div style="font-size:1.25rem; font-weight:700; color:${rem<600?'var(--accent)':'var(--text)'}">
+            ⏱ ${mm}:${ss}
+          </div>
+        </div>
+        <div style="background:var(--bg); padding:1rem; border-radius:8px; margin-bottom:1rem;">
+          <div style="font-weight:600;">Destination: ${h?h.name:'Unknown'}</div>
+          <div class="text-sm">Status: <strong>${c.status.toUpperCase()}</strong></div>
+        </div>
+        <div class="flex-between">
+           <button class="btn btn-outline" onclick="apply({type:'UPDATE_CASE_STATUS', id:'${c.id}', status:'arrived'})">Mark Arrived</button>
+           <a class="btn btn-primary" href="https://www.google.com/maps/dir/?api=1&origin=${ambLat},${ambLng}&destination=${h.lat},${h.lng}&travelmode=driving" target="_blank">Navigate</a>
+        </div>
+      `;
+      panel.appendChild(card);
+    });
+  }
+}
+
+function renderHospView() {
+  let hid = document.getElementById('hosp-select').value;
+  if(!hid) return;
+  let h = S.hospitals.find(x=>x.id===hid);
+  if(!h) return;
+  
+  document.getElementById('hosp-trust-badge').innerText = `Trust: ${h.rel}% | Upd: ${timeAgo(h.upd)}`;
+  document.getElementById('btn-toggle-divert').innerText = h.divert ? "Resume Operations" : "Stop Accepting (Divert)";
+  document.getElementById('btn-toggle-divert').className = h.divert ? "btn btn-success" : "btn btn-accent";
+  document.getElementById('btn-toggle-divert').style.width = "100%";
+  
+  document.getElementById('hosp-nurses-count').innerText = h.r.nurses;
+  document.getElementById('hosp-techs-count').innerText = h.r.techs;
+  
+  let wlist = document.getElementById('hosp-wards-list');
+  wlist.innerHTML = '';
+  h.wards.forEach(w => {
+    let pct = ((w.t - w.f)/w.t)*100;
+    let color = pct>90 ? 'var(--accent)' : pct>70 ? 'var(--warning)' : 'var(--success)';
+    wlist.innerHTML += `
+      <div class="mb-1">
+        <div class="flex-between text-sm mb-1">
+          <span>${w.n}</span>
+          <span>${w.f} free / ${w.t}</span>
+        </div>
+        <div style="width:100%; height:8px; background:var(--border); border-radius:4px; overflow:hidden;">
+          <div style="width:${pct}%; height:100%; background:${color};"></div>
+        </div>
+      </div>
+    `;
+  });
+  
+  let incList = document.getElementById('hosp-incoming-list');
+  let actList = document.getElementById('hosp-active-list');
+  incList.innerHTML = ''; actList.innerHTML = '';
+  
+  let mycases = S.cases.filter(c => c.targetHosp === hid && c.status !== 'completed');
+  mycases.forEach(c => {
+    let et = EMERGENCY_TYPES[c.type];
+    let sbadge = c.sev==='Critical'?'badge-critical':c.sev==='Serious'?'badge-serious':'badge-moderate';
+    let card = document.createElement('div');
+    card.className = 'card ' + (c.status==='dispatched'?'pulse-alert':'');
+    
+    let dist = haversine(ambLat, ambLng, h.lat, h.lng);
+    let eta = Math.round((dist / ROAD_COND[h.road].speed) * 60);
+    
+    card.innerHTML = `
+      <div class="flex-between mb-1">
+        <div><span class="badge ${sbadge}">${c.sev}</span> <strong>${et.icon} ${et.label}</strong></div>
+        <div style="font-weight:700; color:var(--primary)">ETA: ${eta} min</div>
+      </div>
+      <div class="text-sm text-muted mb-1">Patient: ${c.demo||'Unknown'} | Vitals: HR ${c.vitals.hr||'-'}, BP ${c.vitals.bp||'-'}</div>
+      <div class="text-sm mb-1">Notes: ${c.notes||'None'}</div>
+      ${c.status==='dispatched' ? `
+        <div class="flex-between mt-1" style="border-top:1px solid var(--border); padding-top:1rem;">
+          <button class="btn btn-success" onclick="apply({type:'UPDATE_CASE_STATUS', id:'${c.id}', status:'accepted'})">Accept & Prep</button>
+          <button class="btn btn-outline" onclick="apply({type:'UPDATE_CASE_STATUS', id:'${c.id}', status:'declined'})">Decline</button>
+        </div>
+      ` : `
+        <div class="mt-1"><span class="badge" style="background:var(--success); color:white;">Accepted</span> Prep team alerted.</div>
+      `}
+    `;
+    if(c.status==='dispatched') incList.appendChild(card); else actList.appendChild(card);
+  });
+  
+  if(incList.innerHTML==='') incList.innerHTML = '<div class="text-muted">No incoming emergencies.</div>';
+  if(actList.innerHTML==='') actList.innerHTML = '<div class="text-muted">No active cases.</div>';
+  
+  renderEquipment(h);
+  renderDocRoster(h);
+}
+
+function updateStaff(role, val) {
+  let hid = document.getElementById('hosp-select').value;
+  if(hid) {
+    addAudit('Hospital Staff', `${role} count changed by ${val>0?'+':''}${val}`);
+    apply({type:'UPDATE_HOSP_STAFF', id:hid, role:role, val:val});
+  }
+}
+
+function renderEquipment(h) {
+  let el = document.getElementById('hosp-equip-list');
+  if(!el) return;
+  el.innerHTML = '';
+  let equips = [
+    {k:'ct', n:'CT Scanner'}, {k:'cath', n:'Cath Lab'}, {k:'ot', n:'Operating Room'},
+    {k:'burn', n:'Burn Unit'}, {k:'vent', n:'Ventilator'}
+  ];
+  equips.forEach(eq => {
+    let avail = h.r[eq.k];
+    let btn = document.createElement('button');
+    btn.className = 'btn ' + (avail ? 'btn-success' : 'btn-outline');
+    btn.style.cssText = 'font-size:0.8rem;padding:0.4rem 0.8rem;';
+    btn.innerText = eq.n + (avail ? ' ✓' : ' ✗');
+    btn.onclick = () => {
+      const resourceNames={ct:'CT Scanner',cath:'Cath Lab',ot:'Operating Room',burn:'Burn Unit',vent:'Ventilator'};
+      h.r[eq.k] = !h.r[eq.k];
+      h.upd = Date.now();
+      addAudit('Hospital Staff', `${eq.n}: ${h.r[eq.k]?'Available':'Down'}`);
+      const resourceName=resourceNames[eq.k];
+      if(resourceName) {
+        const row=(h.resourceRows||[]).find(r=>r.resource_name.toLowerCase()===resourceName.toLowerCase());
+        const resource={resource_name:resourceName,total:row?.total||1,available:h.r[eq.k]?Math.max(1,row?.available||0):0};
+        if(apiOnline && isOnline) apply({type:'RESOURCE_UPDATE',hospitalId:h.id,resource});
+        else if(!isOnline) S.queue.push({type:'RESOURCE_UPDATE',hospitalId:h.id,resource});
+        h.resourceRows=h.resourceRows||[];
+        if(row) {row.total=resource.total;row.available=resource.available;} else h.resourceRows.push({...resource,resource_type:'equipment'});
+      }
+      saveState(); renderHospView();
+    };
+    el.appendChild(btn);
+  });
+}
+
+function renderDocRoster(h) {
+  let tbody = document.querySelector('#hosp-doc-table tbody');
+  if(!tbody) return;
+  tbody.innerHTML = '';
+  h.docs.sort((a,b) => a.sp.localeCompare(b.sp)).forEach(d => {
+    let tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="padding:0.4rem;">${d.n}</td>
+      <td style="padding:0.4rem;">${d.sp}</td>
+      <td style="padding:0.4rem;">
+        <select class="form-control" style="font-size:0.8rem;padding:0.2rem;" onchange="changeDocStatus('${h.id}','${d.id}',this.value)">
+          <option value="onsite" ${d.st==='onsite'?'selected':''}>On-Site</option>
+          <option value="oncall" ${d.st==='oncall'?'selected':''}>On-Call</option>
+          <option value="busy" ${d.st==='busy'?'selected':''}>Busy</option>
+          <option value="off" ${d.st==='off'?'selected':''}>Off-Duty</option>
+        </select>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function changeDocStatus(hid, did, st) {
+  let h = S.hospitals.find(x=>x.id===hid);
+  let d = h ? h.docs.find(x=>x.id===did) : null;
+  if(d) {
+    addAudit('Hospital Staff', `${d.n} (${d.sp}): ${d.st} → ${st}`);
+    apply({type:'DOC_STATUS', hid:hid, did:did, st:st});
+  }
+}
+
+function addAudit(actor, action) {
+  S.audit.unshift({ ts: Date.now(), actor: actor, action: action });
+  if(S.audit.length > 200) S.audit = S.audit.slice(0, 200);
+}
+
+function renderAuditTrail() {
+  let tbody = document.querySelector('#audit-table tbody');
+  if(!tbody) return;
+  tbody.innerHTML = '';
+  S.audit.slice(0, 30).forEach(a => {
+    let tr = document.createElement('tr');
+    let time = new Date(a.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    tr.innerHTML = `<td style="padding:0.4rem;white-space:nowrap;">${time}</td><td style="padding:0.4rem;">${a.actor}</td><td style="padding:0.4rem;">${a.action}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function registerHospital() {
+  let name = document.getElementById('reg-name').value;
+  if(!name) { showToast('Enter hospital name', 'error'); return; }
+  let city = document.getElementById('reg-city').value;
+  let type = document.getElementById('reg-type').value;
+  let size = parseInt(document.getElementById('reg-size').value);
+  let lat = parseFloat(document.getElementById('reg-lat').value);
+  let lng = parseFloat(document.getElementById('reg-lng').value);
+  
+  let caps = '';
+  if(document.getElementById('reg-ct').checked) caps += 'c';
+  if(document.getElementById('reg-cath').checked) caps += 'a';
+  if(document.getElementById('reg-ot').checked) caps += 'o';
+  if(document.getElementById('reg-burn').checked) caps += 'b';
+  if(document.getElementById('reg-neuro').checked) caps += 'n';
+  if(document.getElementById('reg-cardio').checked) caps += 'r';
+  if(document.getElementById('reg-surgeon').checked) caps += 's';
+  
+  let id = 'h' + S.hospitals.length;
+  let wards = [
+    {k:'bed', n:'Emergency Bay', t: size*10, f: size*8},
+    {k:'resus', n:'Resus Bay', t: size*2, f: size*2},
+    {k:'icu', n:'ICU', t: size*8, f: size*6},
+    {k:'theatre', n:'Operation Theatres', t: size*3, f: size*3},
+    {k:'w2', n:'Medical Ward', t: size*20, f: size*18},
+    {k:'w3', n:'Surgical Ward', t: size*20, f: size*18}
+  ];
+  if(caps.includes('r')) wards.push({k:'ccu', n:'CCU', t: size*5, f: size*4});
+  if(size>1) wards.push({k:'peds', n:'Paediatric Ward', t: size*10, f: size*8});
+  if(size>1) wards.push({k:'mat', n:'Maternity Ward', t: size*10, f: size*8});
+  
+  let docs = [];
+  let sps = ['Emergency Physician', 'General Surgeon'];
+  if(caps.includes('n')) sps.push('Neurosurgeon');
+  if(caps.includes('r')) sps.push('Cardiologist');
+  if(caps.includes('s')) sps.push('Trauma Surgeon');
+  sps.forEach(sp => { docs.push({ id: id+'_d'+docs.length, n: 'Dr. '+genDocName(), sp: sp, st: 'onsite' }); });
+  
+  S.hospitals.push({
+    id, name, city, type, lat, lng, size,
+    gate: 'Emergency entrance', rel: 50, upd: Date.now(),
+    divert: false, ver: false,
+    r: { ct: caps.includes('c'), cath: caps.includes('a'), ot: caps.includes('o'), 
+         burn: caps.includes('b'), neuro: caps.includes('n'), cardio: caps.includes('r'), surgeon: caps.includes('s'),
+         nurses: size*10, techs: size*3, vent: true },
+    wards, docs, road: 'clear'
+  });
+
+  if(apiOnline && isOnline) {
+    const resources=[
+      {resource_type:'bed',resource_name:'Emergency Bed',total:size*10,available:size*8},
+      {resource_type:'icu',resource_name:'ICU',total:size*8,available:size*6},
+      {resource_type:'equipment',resource_name:'CT Scanner',total:caps.includes('c')?1:0,available:caps.includes('c')?1:0},
+      {resource_type:'equipment',resource_name:'Cath Lab',total:caps.includes('a')?1:0,available:caps.includes('a')?1:0},
+      {resource_type:'equipment',resource_name:'Operating Room',total:caps.includes('o')?1:0,available:caps.includes('o')?1:0},
+      {resource_type:'equipment',resource_name:'Burn Unit',total:caps.includes('b')?1:0,available:caps.includes('b')?1:0}
+    ].filter(r=>r.total>0);
+    apiRequest('/hospitals',{method:'POST',body:JSON.stringify({name,city,province:CITY[city]?.[2]||'',type,latitude:lat,longitude:lng,resources,doctors:docs.map(d=>({full_name:d.n,specialization:d.sp,status:d.st}))})})
+      .then(()=>hydrateFromApi().then(()=>renderAll())).catch(e=>showToast(`Hospital registration failed: ${e.message}`,'error'));
+  }
+  
+  addAudit('Authority', `Registered new hospital: ${name} (${city}, ${type}) — pending verification`);
+  saveState(); renderAll();
+  showToast(`${name} registered. Pending verification.`);
+  document.getElementById('reg-name').value = '';
+}
+
+function searchTransfer() {
+  let req = document.getElementById('transfer-req').value;
+  let reason = document.getElementById('transfer-reason').value;
+  if(!req) { showToast('Enter a requirement', 'error'); return; }
+  
+  let hid = document.getElementById('hosp-select').value;
+  let results = document.getElementById('transfer-results');
+  results.innerHTML = '<div class="text-sm text-muted">Searching network...</div>';
+  
+  setTimeout(() => {
+    let matches = S.hospitals.filter(h => h.id !== hid && !h.divert && h.ver !== false);
+    let html = '';
+    matches.slice(0, 3).forEach(h => {
+      let bclass = h.type==='Government'?'badge-gov':h.type==='Private'?'badge-pvt':'badge-char';
+      html += `<div style="padding:0.75rem;border:1px solid var(--border);border-radius:8px;margin-bottom:0.5rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div><strong>${h.name}</strong> <span class="badge ${bclass}">${h.type}</span></div>
+          <button class="btn btn-success" style="font-size:0.8rem;padding:0.3rem 0.6rem;" onclick="requestTransfer('${hid}','${h.id}','${req}')">Request</button>
+        </div>
+        <div class="text-sm text-muted">${h.city} • Trust: ${h.rel}%</div>
+      </div>`;
+    });
+    results.innerHTML = html || '<div class="text-muted">No suitable hospitals found.</div>';
+  }, 500);
+}
+
+function requestTransfer(fromId, toId, req) {
+  let from = S.hospitals.find(h=>h.id===fromId);
+  let to = S.hospitals.find(h=>h.id===toId);
+  addAudit(from.name, `Transfer request to ${to.name}: ${req}`);
+  const transfer={type:'TRANSFER_REQUEST',toHospitalId:toId,reason:document.getElementById('transfer-reason').value,requirements:req};
+  if(apiOnline && isOnline) apiRequest('/transfers',{method:'POST',body:JSON.stringify({to_hospital_id:toId,reason:transfer.reason,requirements:req})}).catch(e=>showToast(`Transfer request failed: ${e.message}`,'error'));
+  else if(!isOnline) { S.queue.push(transfer); saveState(); }
+  saveState();
+  showToast(`Transfer request sent to ${to.name}`);
+  document.getElementById('transfer-results').innerHTML = `<div class="badge" style="background:var(--success);color:white;padding:0.5rem 1rem;">Transfer requested → ${to.name}</div>`;
+}
+
+function verifyHospital(hid) {
+  let h = S.hospitals.find(x=>x.id===hid);
+  if(h) {
+    h.ver = true;
+    h.upd = Date.now();
+    addAudit('Authority', `Verified: ${h.name} (${h.city})`);
+    if(apiOnline && isOnline) apiRequest(`/hospitals/${hid}/verify`,{method:'PUT'}).catch(e=>showToast(`Verification failed: ${e.message}`,'error'));
+    saveState(); renderAll();
+    showToast(`${h.name} verified successfully`);
+  }
+}
+
+function renderDocView() {
+  let dhsel = document.getElementById('doc-hosp-select');
+  if(dhsel.options.length<=1) {
+    S.hospitals.forEach(h => { let o=document.createElement('option'); o.value=h.id; o.innerText=h.name; dhsel.appendChild(o); });
+  }
+  let hid = dhsel.value;
+  let did = document.getElementById('doc-select').value;
+  if(!hid || !did) return;
+  
+  let h = S.hospitals.find(x=>x.id===hid);
+  let d = h.docs.find(x=>x.id===did);
+  if(!d) return;
+  
+  let stat = document.getElementById('doc-status-text');
+  stat.innerText = d.st.toUpperCase();
+  stat.style.background = d.st==='onsite'?'var(--success)':d.st==='oncall'?'var(--warning)':'var(--accent)';
+  stat.style.color = 'white';
+  
+  // mock alerts
+  document.getElementById('doc-alerts').innerHTML = `<div class="card text-muted">No new alerts for ${d.sp}.</div>`;
+  document.getElementById('doc-cases').innerHTML = `<div class="card text-muted">No active assigned cases.</div>`;
+}
+
+function setDocStatus(st) {
+  let hid = document.getElementById('doc-hosp-select').value;
+  let did = document.getElementById('doc-select').value;
+  if(hid && did) apply({type:'DOC_STATUS', hid:hid, did:did, st:st});
+}
+
+function renderAdminView() {
+  document.getElementById('adm-tot-hosp').innerText = S.hospitals.length;
+  document.getElementById('adm-act-emerg').innerText = S.cases.filter(c=>c.status!=='completed').length;
+  document.getElementById('adm-diverts').innerText = S.hospitals.filter(h=>h.divert).length;
+  document.getElementById('adm-avg-resp').innerText = "4.2";
+  
+  let tbody = document.querySelector('#admin-hosp-table tbody');
+  tbody.innerHTML = '';
+  S.hospitals.forEach(h => {
+    let tr = document.createElement('tr');
+    let bclass = h.type==='Government'?'badge-gov':h.type==='Private'?'badge-pvt':'badge-char';
+    tr.innerHTML = `
+      <td><strong>${h.name}</strong></td>
+      <td>${h.city}</td>
+      <td><span class="badge ${bclass}">${h.type}</span></td>
+      <td>${h.divert?'<span class="badge badge-critical">DIVERT</span>':'<span class="badge badge-moderate">ACTIVE</span>'}</td>
+      <td>${h.rel}%</td>
+      <td>${timeAgo(h.upd)}</td>
+      <td>${h.ver===false ? '<button class="btn btn-primary" style="font-size:0.75rem;padding:0.2rem 0.5rem;" onclick="verifyHospital(\''+h.id+'\')">Verify</button>' : '✓'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  
+  renderAuditTrail();
+  updateAdminMap();
+}
+
+// BOOTSTRAP
+window.onload = async () => {
+  loadState();
+  const connected = await hydrateFromApi();
+  initMaps();
+  initUI();
+  renderAll();
+  renderNetwork();
+};
+
+</script>
+</body>
+</html>
